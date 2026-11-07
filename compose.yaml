@@ -1,0 +1,11 @@
+# Preferir la imagen ya validada por la cátedra; no utilizar latest.
+services:
+  localstack:
+    image: ${LOCALSTACK_IMAGE:?Definir imagen aprobada en .env}
+    ports:
+      - "127.0.0.1:4566:4566"
+    environment:
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+      EC2_VM_MANAGER: mock
+      SERVICES: sqs,s3,ec2
+# Python se ejecuta en el host. No se montan credenciales AWS ni socket Docker.
