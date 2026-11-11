@@ -1,5 +1,6 @@
 """CLI de apoyo. Los comandos existen; dependen de completar los TODO del equipo."""
 import argparse  # Proporciona subcomandos reproducibles.
+import functools  # Inyecta el logger del proceso en el handler.
 import json  # Lee archivos de eventos de prueba.
 import os  # Recupera configuración del entorno.
 import time  # Obtiene epoch del emisor.
@@ -53,13 +54,16 @@ def main() -> int:
             json.loads(body)  # Rechaza archivos no JSON antes de enviar.
             timestamp = int(time.time())  # La firma autentica también este número.
             digest = signature(os.environ["WEBHOOK_SECRET"], timestamp, body)
-            response = requests.post("http://127.0.0.1:8000/webhook", data=body,
+            response = requests.post(
+                "http://127.0.0.1:8000/webhook", data=body,
                 headers={"Content-Type": "application/json",
-                         "X-Webhook-Signature": f"t={timestamp},v1={digest}"}, timeout=(2, 15))
-            response.raise_for_status()  # No mostrar éxito ante 4xx o 5xx.
-            print(response.status_code, response.text)  # Respuesta pública del receptor.
+                         "X-Webhook-Signature": f"t={timestamp},v1={digest}"},
+                timeout=(2, 15))
+            print(response.status_code, response.text)  # También 401/400/422/503 para diagnóstico.
+            response.raise_for_status()  # No mostrar éxito ante 4xx o 5xx: sale con código 1.
         elif args.command == "worker":  # Consume un mensaje por consulta.
-            worker.run(sqs.queue_url(prefix), remediation.handle, logger, args.once)
+            handler = functools.partial(remediation.handle, logger=logger)  # Mismo log JSON.
+            worker.run(sqs.queue_url(prefix), handler, logger, args.once)
     except KeyboardInterrupt:  # Detención manual esperada.
         logger.info("detenido_por_operador")  # No se captura BaseException.
     except (ProjectError, BotoCoreError, ClientError, OSError, ValueError, KeyError,
@@ -70,6 +74,7 @@ def main() -> int:
     finally:  # Se libera el pipeline tanto en éxito como en error.
         listener.stop()  # No return, break ni continue dentro de finally.
     return code  # El código de salida refleja el resultado de la ejecución.
+
 
 if __name__ == "__main__":  # Permite python -m fenix.cli.
     sys.exit(main())  # Hace visible el resultado a la terminal.
