@@ -1,4 +1,4 @@
-"""Adaptador de avisos por consola o Telegram."""
+
 import os
 
 import requests
