@@ -6,6 +6,7 @@ import pytest  # Fixtures, marcas y excepciones esperadas.
 from botocore.exceptions import ClientError, EndpointConnectionError
 from fenix.config.settings import client
 from fenix.services import cloud_support, remediation
+from fenix.services.events import fingerprint
 from fenix.utils.errors import PermanentError, RetryableError, ValidationError
 from fenix.utils.state import load, save
 
@@ -238,6 +239,7 @@ def test_f02_full_ledger_after_repair_and_notice(stages):
     assert record["repair_done"] and record["notified"]
     assert record["repair_result"] == "repaired" and record["status"] == "completed"
     assert record["attempts"] == 1 and record["event"] == event()
+    assert record["fingerprint"] == fingerprint(event())  # Huella de I1 asociada al event_id.
     assert len(stages.repairs) == 1 and len(stages.notices) == 1
     assert "evt-node-500" in stages.notices[0]
 

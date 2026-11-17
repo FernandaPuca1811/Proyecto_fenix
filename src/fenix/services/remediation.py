@@ -6,7 +6,7 @@ from botocore.exceptions import ConnectionError as BotoConnectionError, HTTPClie
 from fenix.config.settings import client
 from fenix.utils.state import load, save
 from fenix.services.cloud_support import aws_tags
-from fenix.services.events import validate
+from fenix.services.events import fingerprint, validate
 from fenix.services.notifications import notify
 from fenix.utils.errors import ProjectError, RetryableError, PermanentError
 
@@ -286,12 +286,13 @@ def handle(event: dict, logger: logging.Logger | None = None) -> None:
     event = validate(event, inventory)  # SQS puede recibir mensajes que no pasaron por HTTP.
     event_id = event["event_id"]
     context = {"event_id": event_id, "resource_id": event["resource_id"]}
+    digest = fingerprint(event)  # Huella del contenido (integrante 1).
     record = load(LEDGER).get(event_id)  # Etapas ya completadas para este evento.
     if record is None:  # Primera vez: el contenido queda asociado al event_id.
-        record = {"event": event, "attempts": 0, "repair_done": False, "repair_result": None,
-                  "notified": False, "status": "received", "last_error": None,
-                  "created_at": utc_now()}
-    elif record.get("event") != event:  # Mismo ID con otro contenido: no se toca nada.
+        record = {"event": event, "fingerprint": digest, "attempts": 0, "repair_done": False,
+                  "repair_result": None, "notified": False, "status": "received",
+                  "last_error": None, "created_at": utc_now()}
+    elif record.get("fingerprint") != digest:  # Mismo ID con otro contenido: no se toca nada.
         log.error("conflicto_event_id", extra={**context, "action": "ledger",
                                                "status": "conflict"})
         raise PermanentError("event_id reutilizado con contenido distinto")
