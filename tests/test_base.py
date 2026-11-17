@@ -65,9 +65,19 @@ def test_json_log_context(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # Aísla los logs del ensayo.
     logger, listener = setup("test")  # Inicia un único pipeline.
     try:  # Asegura vaciar la cola aunque falle la aserción posterior.
-        logger.info("recibido", extra={"event_id": "evt-001"})  # Contexto público.
+        logger.info("recibido", extra={
+            "event_id": "evt-001", "message_id": "msg-001", "resource_id": "node-01",
+            "attempt": 2, "action": "repair", "status": "ok", "secret": "no-log",
+        })  # Solo se conservan los campos de contexto públicos.
     finally:  # La limpieza no decide éxito del negocio.
         listener.stop()  # Drena los registros pendientes.
     row = json.loads(next((tmp_path / "logs").glob("*.jsonl")).read_text())
     assert row["event_id"] == "evt-001"  # Conserva correlación.
+    assert row["message_id"] == "msg-001"  # Contexto SQS permitido.
+    assert row["resource_id"] == "node-01"  # Contexto de recurso permitido.
+    assert row["attempt"] == 2  # Contexto de recepción permitido.
+    assert row["action"] == "repair"  # Contexto de acción permitido.
+    assert row["status"] == "ok"  # Contexto de resultado permitido.
+    assert row["level"] == "INFO"  # Conserva el nivel para los cinco niveles.
+    assert "secret" not in row  # No serializa extras fuera de la lista permitida.
     assert row["timestamp"].endswith("+00:00")  # Fecha UTC explícita.

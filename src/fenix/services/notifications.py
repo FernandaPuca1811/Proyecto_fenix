@@ -1,36 +1,84 @@
-"""Adaptador HTTP guiado. Elegir Telegram O Slack, no ambos obligatoriamente."""
-import os  # Recupera credenciales fuera del repositorio.
-import requests  # Aplica timeout explícito a cada llamada HTTP.
+
+import os
+
+import requests
 from fenix.utils.errors import PermanentError, RetryableError
 
 
 def notify(text: str) -> None:
-    """Envía un mensaje breve y valida la respuesta del proveedor seleccionado.
+    """Envía un mensaje breve y confirma el éxito del proveedor seleccionado.
 
     Args:
-        text: Resumen público de hasta 1000 caracteres, sin secretos ni raw body.
+        text: Resumen público; se limita a 1000 caracteres.
     Returns:
         None únicamente después de confirmar éxito del proveedor.
     Raises:
         RetryableError: Timeout, conexión, 429 o respuesta 5xx.
         PermanentError: Configuración inválida, 4xx definitivo o rechazo funcional.
-        NotImplementedError: Mientras falte TODO I4-A.
     Side Effects:
-        Publica en el chat/canal del grupo. Un timeout puede causar duplicados.
+        Publica en el chat configurado. Un timeout puede causar duplicados.
     Notes:
         El modo console sirve para desarrollo; no reemplaza la evidencia final real.
-        No registrar la excepción requests original: puede contener el token en URL.
+        No se duerme ante 429: SQS administra los reintentos del worker.
     """
-    mode = os.getenv("NOTIFY_PROVIDER", "console")  # Selecciona un adaptador explícito.
-    if mode == "console":  # Ensayo local sin credenciales de terceros.
-        print(text[:1000])  # No imprimir eventos completos o URLs privadas.
-        return  # El modo debe figurar en el informe de pruebas.
-    # TODO I4-A Telegram: POST https://api.telegram.org/bot{token}/sendMessage.
-    # Leer TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID desde entorno; payload chat_id/text.
-    # Verificar status HTTP y JSON con ok is True; no basta con un HTTP 200.
-    # TODO I4-A Slack: POST a SLACK_WEBHOOK_URL con json={"text": text[:1000]}.
-    # Verificar status 200 y body.strip() == "ok"; Slack no exige JSON de respuesta.
-    # Usar timeout=(2, 5); capturar Timeout/ConnectionError sin copiar su mensaje.
-    # 429 y 5xx son transitorios; leer Retry-After y documentar demora acotada.
-    # Otros 4xx son permanentes; no reintentar infinitamente credenciales inválidas.
-    raise NotImplementedError("I4-A: implementar proveedor externo elegido")
+    if not isinstance(text, str) or not text.strip():
+        raise PermanentError("Mensaje de notificación inválido")
+
+    message = text[:1000]
+    mode = os.getenv("NOTIFY_PROVIDER", "console")
+    if mode == "console":
+        print(message)
+        return
+    if mode != "telegram":
+        raise PermanentError("Proveedor de notificaciones no configurado")
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    if not token.strip() or not chat_id.strip():
+        raise PermanentError("Falta configuración de Telegram")
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        response = requests.post(
+            url,
+            json={"chat_id": chat_id, "text": message},
+            timeout=(2, 5),
+        )
+    except requests.exceptions.RequestException as error:
+        response = error.response
+        if response is not None:
+            status = response.status_code
+            if status == 429 or status >= 500:
+                raise RetryableError("Telegram no disponible temporalmente") from None
+            if 400 <= status < 500:
+                raise PermanentError("Telegram rechazó la notificación") from None
+            raise PermanentError("Respuesta HTTP inesperada de Telegram") from None
+        if isinstance(error, (
+            requests.exceptions.InvalidURL,
+            requests.exceptions.InvalidSchema,
+            requests.exceptions.MissingSchema,
+            requests.exceptions.URLRequired,
+            requests.exceptions.InvalidHeader,
+            requests.exceptions.TooManyRedirects,
+        )):
+            raise PermanentError("Configuración de Telegram inválida") from None
+        raise RetryableError("Fallo temporal de conexión con Telegram") from None
+
+    status = response.status_code
+    if status == 429 or status >= 500:
+        raise RetryableError("Telegram no disponible temporalmente")
+    if 400 <= status < 500:
+        raise PermanentError("Telegram rechazó la notificación")
+    if not 200 <= status < 300:
+        raise PermanentError("Respuesta HTTP inesperada de Telegram")
+
+    try:
+        payload = response.json()
+    except (ValueError, requests.exceptions.RequestException):
+        raise RetryableError("Telegram devolvió una respuesta inválida") from None
+
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        error_code = payload.get("error_code") if isinstance(payload, dict) else None
+        if error_code == 429 or (isinstance(error_code, int) and error_code >= 500):
+            raise RetryableError("Telegram no disponible temporalmente")
+        raise PermanentError("Telegram no confirmó la notificación")
