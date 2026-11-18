@@ -25,7 +25,14 @@ def test_rotated_log_is_valid_gzip_jsonl(tmp_path, monkeypatch):
                 "registro de prueba %s %s",
                 index,
                 "x" * 512,
-                extra={"event_id": f"evt-{index:03d}"},
+                extra={
+                    "event_id": f"evt-{index:03d}",
+                    "resource_id": "node-01",
+                    "attempt": index + 1,
+                    "action": "test",
+                    "status": "ok",
+                    "token": "test-secret",
+                },
             )
     finally:
         listener.stop()
@@ -43,3 +50,12 @@ def test_rotated_log_is_valid_gzip_jsonl(tmp_path, monkeypatch):
     assert rows, "El histórico gzip debería contener líneas JSON"
     assert all(row["event_id"].startswith("evt-") for row in rows)
     assert all(row["level"] == "INFO" for row in rows)
+    assert all(row["timestamp"].endswith("+00:00") for row in rows)
+    assert all(
+        row["resource_id"] == "node-01"
+        and isinstance(row["attempt"], int)
+        and row["action"] == "test"
+        and row["status"] == "ok"
+        for row in rows
+    )
+    assert all("token" not in row and "test-secret" not in json.dumps(row) for row in rows)
