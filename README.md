@@ -19,3 +19,8 @@ La CLI inicializa un logger por comando y detiene su listener al salir. Para pro
 ```bash
 PYTHONPATH=src python3 -m pytest tests/test_logging_f16.py -q
 ```
+
+El adaptador de Telegram trata timeout, conexión, HTTP 429 y 5xx como transitorios.
+Si la respuesta incluye `Retry-After`, espera ese tiempo hasta un máximo de 30 segundos;
+después propaga el error para que el worker/SQS administre el siguiente intento. Un
+`Retry-After` inválido se ignora y el error transitorio se conserva.
