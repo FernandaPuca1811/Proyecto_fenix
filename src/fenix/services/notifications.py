@@ -108,3 +108,4 @@ def notify(text: str) -> None:
         if error_code == 429 or (isinstance(error_code, int) and error_code >= 500):
             raise RetryableError("Telegram no disponible temporalmente")
         raise PermanentError("Telegram no confirmó la notificación")
+    
