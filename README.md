@@ -1,14 +1,94 @@
-# Plantillas del proyecto Fenix
+# 🔥 Proyecto Fénix — Sistema de Autorreparación de Infraestructura
 
-Leer Guia.md o la consigna PDF antes de ejecutar. Este es un punto de partida didáctico: los TODO y NotImplementedError son tareas del equipo, no una aplicación terminada.
+**TP Final — Programación para Automatización II (PPA2)**
 
-## Inicio
+Sistema de autorreparación de infraestructura cloud emulada que detecta desviaciones en recursos EC2 y S3, las corrige de forma convergente y notifica el resultado. Toda la operación se ejecuta contra **LocalStack** (emulador local de AWS) sin credenciales ni recursos reales.
 
-Crear y activar un entorno virtual Python 3.11 o superior. Desde esta carpeta ejecutar `python -m pip install -e .`, copiar `.env.example` a `.env`, completar variables y usar la instalación LocalStack validada por la cátedra. El compose de referencia usa EC2 mock, sin VM real. Python corre en el host.
+---
 
-`python -m pytest -m base -q` verifica el apoyo ya implementado. `python -m pytest -m pendiente -q` falla inicialmente hasta completar contratos. No confundir esas marcas con aprobación del TP.
+## Arquitectura
 
-La guía contiene los comandos exactos, matriz de pruebas, roles y requisitos del README definitivo que debe escribir el equipo. Reemplazar este README inicial por su documentación completa.
+```
+┌──────────────┐    HMAC-SHA256     ┌──────────────────┐    SQS     ┌──────────────┐
+│  CLI send    │ ──────────────────►│  Receptor HTTP   │ ─────────► │  Cola SQS    │
+│  (firma +    │   POST /webhook    │  (FastAPI/Uvicorn)│  publish   │  events      │
+│   evento)    │                    │  verify → validate│           │              │
+└──────────────┘                    │  → enqueue (202) │           └──────┬───────┘
+                                    └──────────────────┘                  │ receive
+                                                                         ▼
+┌──────────────┐    Telegram/       ┌──────────────────┐          ┌──────────────┐
+│  Canal de    │ ◄──────────────────│  Remediación     │ ◄────────│   Worker     │
+│  Notificación│    console         │  (repair + notify)│  handler │  (1 msg/vez) │
+└──────────────┘                    │  ledger durable  │          │  ACK/retry   │
+                                    └──────────────────┘          └──────────────┘
+                                           │                             │
+                                           ▼                             │ backoff
+                                    ┌──────────────┐              ┌──────────────┐
+                                    │ EC2 / S3     │              │   DLQ        │
+                                    │ (LocalStack) │              │  (maxReceive │
+                                    └──────────────┘              │   Count = 3) │
+                                                                  └──────────────┘
+```
+
+**Flujo principal:**
+
+1. `CLI send` firma un evento JSON con HMAC-SHA256 y lo envía vía HTTP al receptor.
+2. El **receptor FastAPI** verifica la firma, valida el evento contra el inventario y lo encola en SQS (respuesta `202 Accepted`).
+3. El **worker** consume mensajes de la cola uno a uno con long polling (10 s).
+4. El **handler de remediación** revalida el evento, repara el recurso (arranca EC2 o restaura tags de S3) y notifica por Telegram/consola, registrando cada etapa en un ledger durable (`data/events.json`).
+5. Solo tras el éxito durable del handler se ejecuta el ACK (delete del mensaje). Ante fallas, se aplica **backoff exponencial** vía `change_message_visibility`. Tras 3 recepciones fallidas, SQS aísla el mensaje en la **DLQ**.
+
+---
+
+## Requisitos Previos
+
+| Requisito               | Versión mínima                                             |
+| ----------------------- | ---------------------------------------------------------- |
+| Python                  | 3.11+                                                      |
+| Docker + Docker Compose | Para ejecutar LocalStack                                   |
+| LocalStack              | Imagen `localstack/localstack:4.14.0` (definida en `.env`) |
+
+### Dependencias Python
+
+Declaradas en [`requirements.txt`](requirements.txt):
+
+```
+boto3
+fastapi
+uvicorn
+requests
+python-dotenv
+pytest
+httpx
+```
+
+---
+
+## Instalación y Despliegue
+
+### 1. Clonar y crear entorno virtual
+
+```bash
+git clone <URL_DEL_REPOSITORIO>
+cd tp-final
+python -m venv .venv
+
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+
+# Linux/macOS
+source .venv/bin/activate
+```
+
+### 2. Instalar el proyecto en modo editable
+
+```bash
+python -m pip install -e .
+```
+
+### 3. Configurar variables de entorno
+
+Crear el archivo `.env` en la raíz del proyecto (está ignorado por `.gitignore`):
 
 ## Distribución de roles
 
@@ -36,7 +116,7 @@ El módulo `fenix.utils.logging_json` configura un logger JSON asíncrono para c
 La CLI inicializa un logger por comando y detiene su listener al salir. Para probar la rotación y comprobar que el histórico gzip contiene líneas JSON válidas:
 
 ```bash
-PYTHONPATH=src python3 -m pytest tests/test_logging_f16.py -q
+python -m pytest tests/test_logging_f16.py -q
 ```
 
 El adaptador de Telegram trata timeout, conexión, HTTP 429 y 5xx como transitorios.
