@@ -1,5 +1,6 @@
 .env*
 __pycache__/
 *.py[cod]
+*.pyc
 logs/
 src/ppa2_fenix.egg-info/SOURCES.txt

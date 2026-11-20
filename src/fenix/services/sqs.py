@@ -23,11 +23,18 @@ def ensure_queues(prefix: str) -> tuple[str, str]:
         "MessageRetentionPeriod": "1209600"})["QueueUrl"]  # Retiene 14 días.
     arn = sqs.get_queue_attributes(QueueUrl=dead,
         AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]  # No inventa ARN.
-    # TODO I2-A: crear {prefix}-events con VisibilityTimeout="45" y retención "345600".
-    # Crear RedrivePolicy con json.dumps, deadLetterTargetArn=arn y maxReceiveCount="3".
-    # Usar set_queue_attributes para asegurar la política aunque la cola exista.
-    # Retornar las URLs devueltas por SQS; no construirlas con strings.
-    raise NotImplementedError("I2-A: completar cola principal y RedrivePolicy")
+    work = sqs.create_queue(QueueName=f"{prefix}-events", Attributes={
+        "VisibilityTimeout": "45",
+        "MessageRetentionPeriod": "345600",  # Retiene 4 días.
+    })["QueueUrl"]  # El SDK retorna la URL existente si la cola ya fue creada.
+    redrive = json.dumps({
+        "deadLetterTargetArn": arn,
+        "maxReceiveCount": "3",
+    })  # Política serializada como JSON string para el atributo de SQS.
+    sqs.set_queue_attributes(QueueUrl=work, Attributes={
+        "RedrivePolicy": redrive,
+    })  # Asegura la política aunque la cola ya existiera con otra configuración.
+    return work, dead  # URLs devueltas por el SDK; no construidas manualmente.
 
 
 def queue_url(prefix: str) -> str:
@@ -120,8 +127,11 @@ def retry_later(url: str, message: dict) -> int:
     Side Effects:
         Cambia la visibilidad; RedrivePolicy sigue controlando la DLQ.
     """
-    # TODO I2-B: leer int(message["Attributes"]["ApproximateReceiveCount"]).
-    # Calcular min(30, 2 ** count) y llamar change_message_visibility.
-    # Pasar el ReceiptHandle actual; retornar segundos para registrarlos.
-    # Nunca send_message aquí: una copia reiniciaría la cuenta de recepciones.
-    raise NotImplementedError("I2-B: programar backoff con visibilidad")
+    count = int(message["Attributes"]["ApproximateReceiveCount"])  # Recepción actual.
+    delay = min(30, 2 ** count)  # Backoff exponencial acotado a 30 segundos.
+    client("sqs").change_message_visibility(  # Reprograma sin copiar el mensaje.
+        QueueUrl=url,
+        ReceiptHandle=message["ReceiptHandle"],  # Handle de la recepción vigente.
+        VisibilityTimeout=delay,
+    )  # RedrivePolicy decide cuándo mover a DLQ; este cambio solo afecta el delay.
+    return delay  # El llamador registra el tiempo asignado para diagnóstico.
