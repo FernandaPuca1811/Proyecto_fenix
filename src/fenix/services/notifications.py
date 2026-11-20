@@ -1,8 +1,32 @@
 
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+import math
 import os
+import time
 
 import requests
 from fenix.utils.errors import PermanentError, RetryableError
+
+
+def _wait_retry_after(response: requests.Response) -> None:
+    """Espera según Retry-After, limitado a 30 segundos; ignora valores malformados."""
+    headers = getattr(response, "headers", None)
+    value = headers.get("Retry-After") if headers else None
+    if not value:
+        return
+    try:
+        delay = float(value)
+    except (TypeError, ValueError):
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
+    if math.isfinite(delay):
+        time.sleep(min(30, max(0, delay)))
 
 
 def notify(text: str) -> None:
@@ -19,7 +43,7 @@ def notify(text: str) -> None:
         Publica en el chat configurado. Un timeout puede causar duplicados.
     Notes:
         El modo console sirve para desarrollo; no reemplaza la evidencia final real.
-        No se duerme ante 429: SQS administra los reintentos del worker.
+        Retry-After se respeta hasta 30 segundos; SQS administra los reintentos siguientes.
     """
     if not isinstance(text, str) or not text.strip():
         raise PermanentError("Mensaje de notificación inválido")
@@ -49,6 +73,7 @@ def notify(text: str) -> None:
         if response is not None:
             status = response.status_code
             if status == 429 or status >= 500:
+                _wait_retry_after(response)
                 raise RetryableError("Telegram no disponible temporalmente") from None
             if 400 <= status < 500:
                 raise PermanentError("Telegram rechazó la notificación") from None
@@ -66,6 +91,7 @@ def notify(text: str) -> None:
 
     status = response.status_code
     if status == 429 or status >= 500:
+        _wait_retry_after(response)
         raise RetryableError("Telegram no disponible temporalmente")
     if 400 <= status < 500:
         raise PermanentError("Telegram rechazó la notificación")
@@ -82,3 +108,4 @@ def notify(text: str) -> None:
         if error_code == 429 or (isinstance(error_code, int) and error_code >= 500):
             raise RetryableError("Telegram no disponible temporalmente")
         raise PermanentError("Telegram no confirmó la notificación")
+    

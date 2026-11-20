@@ -1,0 +1,59 @@
+{
+  "evt-tg-425148c62713": {
+    "event": {
+      "schema_version": 1,
+      "event_id": "evt-tg-425148c62713",
+      "event_type": "bucket.tags_missing",
+      "resource_id": "bucket-01",
+      "occurred_at": "2026-10-22T18:00:00Z",
+      "simulate_failures": 0
+    },
+    "fingerprint": "ffd4091873e9f1212e167d0adaf9ff6976da54b2259d90ab31c00b9739503079",
+    "attempts": 1,
+    "repair_done": true,
+    "repair_result": "already_ok",
+    "notified": true,
+    "status": "completed",
+    "last_error": null,
+    "created_at": "2026-11-20T01:31:31+00:00",
+    "updated_at": "2026-11-20T01:31:32+00:00"
+  },
+  "evt-tg-77822e50bb46": {
+    "event": {
+      "schema_version": 1,
+      "event_id": "evt-tg-77822e50bb46",
+      "event_type": "bucket.tags_missing",
+      "resource_id": "bucket-01",
+      "occurred_at": "2026-10-22T18:00:00Z",
+      "simulate_failures": 0
+    },
+    "fingerprint": "f190b95c8b9d15c5ac7dae1b1f4dc98cfe6550e1e69902fa479a2218f8369fb2",
+    "attempts": 4,
+    "repair_done": true,
+    "repair_result": "already_ok",
+    "notified": true,
+    "status": "completed",
+    "last_error": null,
+    "created_at": "2026-11-20T01:48:03+00:00",
+    "updated_at": "2026-11-20T02:16:12+00:00"
+  },
+  "evt-bucket-001": {
+    "event": {
+      "schema_version": 1,
+      "event_id": "evt-bucket-001",
+      "event_type": "bucket.tags_missing",
+      "resource_id": "bucket-01",
+      "occurred_at": "2026-10-22T18:00:00Z",
+      "simulate_failures": 0
+    },
+    "fingerprint": "e710e035aef061b1a79d43c0764bc0080b54c5c90e0037d7481fdb988653a7e9",
+    "attempts": 1,
+    "repair_done": true,
+    "repair_result": "already_ok",
+    "notified": true,
+    "status": "completed",
+    "last_error": null,
+    "created_at": "2026-11-20T02:24:00+00:00",
+    "updated_at": "2026-11-20T02:24:01+00:00"
+  }
+}

@@ -9,11 +9,13 @@ from fenix.services.notifications import notify
 from fenix.utils.errors import PermanentError, RetryableError
 
 
-def _response(status_code: int, payload: object) -> SimpleNamespace:
+def _response(
+    status_code: int, payload: object, headers: dict | None = None
+) -> SimpleNamespace:
     return SimpleNamespace(
         status_code=status_code,
         json=Mock(return_value=payload),
-        headers={},
+        headers={} if headers is None else headers,
     )
 
 
@@ -86,19 +88,79 @@ def test_request_exception_response_is_classified(monkeypatch, status, error_typ
     assert "private" not in str(raised.value)
 
 
-@pytest.mark.parametrize("status", [429, 500, 503])
-def test_telegram_rate_limit_and_server_errors_are_retryable(monkeypatch, status):
-    """Deja los reintentos transitorios al worker/SQS, sin dormir en notify."""
+def test_http_error_response_honors_retry_after(monkeypatch):
+    """También usa Retry-After si requests lanza con la respuesta adjunta."""
     monkeypatch.setenv("NOTIFY_PROVIDER", "telegram")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "test-chat")
+    response = _response(429, {}, {"Retry-After": "7"})
+    error = requests.HTTPError("private", response=response)
+    sleeps = []
+    monkeypatch.setattr("fenix.services.notifications.time.sleep", sleeps.append)
     monkeypatch.setattr(
         "fenix.services.notifications.requests.post",
-        Mock(return_value=_response(status, {})),
+        Mock(side_effect=error),
     )
 
     with pytest.raises(RetryableError):
         notify("falló reparación")
+
+    assert sleeps == [7]
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_telegram_rate_limit_and_server_errors_are_retryable(monkeypatch, status):
+    """Los 429/5xx son reintentables y honran Retry-After con tope de 30 s."""
+    monkeypatch.setenv("NOTIFY_PROVIDER", "telegram")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "test-chat")
+    sleeps = []
+    monkeypatch.setattr("fenix.services.notifications.time.sleep", sleeps.append)
+    monkeypatch.setattr(
+        "fenix.services.notifications.requests.post",
+        Mock(return_value=_response(status, {}, {"Retry-After": "45"})),
+    )
+
+    with pytest.raises(RetryableError):
+        notify("falló reparación")
+
+    assert sleeps == [30]
+
+
+def test_telegram_retry_after_accepts_short_delay(monkeypatch):
+    """Respeta un Retry-After corto sin excederlo."""
+    monkeypatch.setenv("NOTIFY_PROVIDER", "telegram")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "test-chat")
+    sleeps = []
+    monkeypatch.setattr("fenix.services.notifications.time.sleep", sleeps.append)
+    monkeypatch.setattr(
+        "fenix.services.notifications.requests.post",
+        Mock(return_value=_response(429, {}, {"Retry-After": "4"})),
+    )
+
+    with pytest.raises(RetryableError):
+        notify("falló reparación")
+
+    assert sleeps == [4]
+
+
+def test_invalid_retry_after_does_not_hide_retryable_error(monkeypatch):
+    """Un encabezado inválido no oculta ni transforma el error transitorio."""
+    monkeypatch.setenv("NOTIFY_PROVIDER", "telegram")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "test-chat")
+    sleeps = []
+    monkeypatch.setattr("fenix.services.notifications.time.sleep", sleeps.append)
+    monkeypatch.setattr(
+        "fenix.services.notifications.requests.post",
+        Mock(return_value=_response(429, {}, {"Retry-After": "not-a-delay"})),
+    )
+
+    with pytest.raises(RetryableError):
+        notify("falló reparación")
+
+    assert sleeps == []
 
 
 @pytest.mark.parametrize("status", [400, 401, 403, 404])

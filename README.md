@@ -2,6 +2,8 @@
 
 **TP Final — Programación para Automatización II (PPA2)**
 
+Link de defensa en YouTube: https://www.youtube.com/watch?v=ojaDcjFT7wA
+
 Sistema de autorreparación de infraestructura cloud emulada que detecta desviaciones en recursos EC2 y S3, las corrige de forma convergente y notifica el resultado. Toda la operación se ejecuta contra **LocalStack** (emulador local de AWS) sin credenciales ni recursos reales.
 
 ---
@@ -90,219 +92,26 @@ python -m pip install -e .
 
 Crear el archivo `.env` en la raíz del proyecto (está ignorado por `.gitignore`):
 
-```env
-AWS_ENDPOINT_URL=http://127.0.0.1:4566
-AWS_ACCESS_KEY_ID=test
-AWS_SECRET_ACCESS_KEY=test
-AWS_DEFAULT_REGION=us-east-1
-GROUP_ID=grupo01
-QUEUE_PREFIX=fenix-grupo01
-PROJECT=fenix
-WEBHOOK_SECRET=<secreto_de_al_menos_16_caracteres>
-NOTIFY_PROVIDER=telegram
-TELEGRAM_BOT_TOKEN=<token_del_bot>
-TELEGRAM_CHAT_ID=<chat_id>
-LOCALSTACK_AUTH_TOKEN=<token_de_localstack>
-LOCALSTACK_IMAGE=localstack/localstack:4.14.0
-```
+## Distribución de roles
 
-> **Nota:** `NOTIFY_PROVIDER=console` imprime las notificaciones en terminal en lugar de enviarlas por Telegram.
+La consigna distribuye el trabajo entre seis integrantes; no existe un rol 7.
+Esta sección resume los roles que forman parte de esta documentación.
 
-### 4. Levantar LocalStack
+| Rol | Responsabilidad principal |
+| --- | --- |
+| Integrante 1 - Entradas y Excepciones | Validar los eventos antes de enviarlos a SQS, rechazar esquemas, identificadores y recursos inválidos, y proporcionar errores controlados. |
+| Integrante 3 - Webhooks y Reparación | Autenticar el webhook con HMAC, publicar los eventos confirmados y ejecutar las reparaciones convergentes de EC2 y S3. |
+| Integrante 4 - Observabilidad y Comunicación | Revisar el logging JSON, completar el adaptador de notificaciones y correlacionar los pasos relevantes con trazas y evidencias. |
+| Integrante 5 - Integración y Worker | Implementar el consumo de SQS y el procesamiento por etapas, manteniendo el estado local y evitando reparaciones o avisos repetidos. |
 
-```bash
-docker compose up -d
-```
+### Alcance resumido
 
-Esto inicia LocalStack con los servicios `sqs`, `s3` y `ec2` en modo mock (`EC2_VM_MANAGER=mock`) en `http://localhost:4566`. Python se ejecuta en el host, no dentro del contenedor.
+- **Integrante 1:** valida entradas y recursos, usa mensajes de error seguros y registra una evidencia individual sin publicar datos inválidos.
+- **Integrante 3:** verifica firma y antigüedad del timestamp, responde con los códigos HTTP definidos y demuestra las reparaciones mediante API.
+- **Integrante 4:** produce logs JSON legibles, registra un histórico gzip y administra el canal de avisos sin ocultar errores controlados.
+- **Integrante 5:** coordina receptor, cola, persistencia, reparación y ACK; también debe reanudar una ejecución incompleta sin repetir efectos confirmados.
 
----
-
-## Uso de la CLI
-
-Todos los comandos se ejecutan desde la raíz del proyecto con el entorno virtual activado.
-
-### Inicializar colas SQS
-
-```bash
-python -m fenix.cli init-queues
-```
-
-Crea la Dead Letter Queue (`{QUEUE_PREFIX}-dlq`) y la cola principal (`{QUEUE_PREFIX}-events`) con `RedrivePolicy` (`maxReceiveCount=3`). Es **idempotente**: si las colas ya existen, retorna las mismas URLs.
-
-### Provisionar infraestructura de laboratorio
-
-```bash
-python -m fenix.cli setup-demo
-```
-
-Crea o reutiliza los recursos mock en LocalStack:
-
-- **`node-01`**: Security Group + instancia EC2 (`t3.micro`) con `ClientToken` estable.
-- **`bucket-01`**: Bucket S3 en `us-east-1`.
-
-Ambos recursos reciben las etiquetas obligatorias `ManagedBy=ppa2`, `Project=fenix`, `GroupId=<grupo>`, `Owner=<grupo>`. Persiste el inventario en `data/inventory.json` mediante reemplazo atómico.
-
-### Inyectar una falla controlada
-
-```bash
-python -m fenix.cli fault node-01     # Detiene la instancia EC2
-python -m fenix.cli fault bucket-01   # Elimina la etiqueta Owner del bucket
-```
-
-### Enviar un evento firmado al receptor
-
-```bash
-# Primero, iniciar el receptor en otra terminal:
-uvicorn fenix.services.receiver:app --host 127.0.0.1 --port 8000
-
-# Enviar el evento:
-python -m fenix.cli send examples/node-event.json
-python -m fenix.cli send examples/bucket-event.json
-```
-
-El comando firma el JSON con HMAC-SHA256 (`WEBHOOK_SECRET`) y lo envía como `POST /webhook`. El receptor valida la firma, verifica el contrato del evento contra el inventario, y encola en SQS respondiendo `202 Accepted`.
-
-### Ejecutar el worker
-
-```bash
-python -m fenix.cli worker           # Bucle continuo con long polling
-python -m fenix.cli worker --once    # Una sola consulta (útil para pruebas)
-```
-
-El worker consume mensajes de SQS, ejecuta la remediación (arrancar instancia o restaurar tags), notifica el resultado y hace ACK. Los logs se escriben en `logs/fenix-worker-<PID>.jsonl`.
-
-### Monitoreo de logs en tiempo real
-
-```powershell
-# PowerShell
-Get-Content logs\fenix-worker-*.jsonl -Wait -Tail 10
-
-# Linux/macOS
-tail -f logs/fenix-worker-*.jsonl
-```
-
----
-
-## Eventos de Ejemplo
-
-### `examples/node-event.json`
-
-```json
-{
-  "schema_version": 1,
-  "event_id": "evt-node-001",
-  "event_type": "instance.stopped",
-  "resource_id": "node-01",
-  "occurred_at": "2026-10-22T18:00:00Z",
-  "simulate_failures": 0
-}
-```
-
-### `examples/bucket-event.json`
-
-```json
-{
-  "schema_version": 1,
-  "event_id": "evt-bucket-001",
-  "event_type": "bucket.tags_missing",
-  "resource_id": "bucket-01",
-  "occurred_at": "2026-10-22T18:00:00Z",
-  "simulate_failures": 0
-}
-```
-
-> El campo `simulate_failures` (0–5) permite forzar fallas de laboratorio para probar el mecanismo de reintentos.
-
----
-
-## Ejecución de Tests
-
-```bash
-# Tests del apoyo ya implementado (no requieren LocalStack)
-python -m pytest -m base -q
-
-# Tests de contratos completados por el equipo
-python -m pytest -m pendiente -q
-
-# Tests del integrante 1 (validación y eventos)
-python -m pytest -m i1 -q
-
-# Tests de integración (requieren LocalStack corriendo)
-python -m pytest -m integracion -q
-
-# Todos los tests
-python -m pytest -q
-```
-
----
-
-## Estructura del Proyecto
-
-```
-tp-final/
-├── compose.yaml                    # Docker Compose para LocalStack
-├── pyproject.toml                  # Configuración del paquete Python
-├── requirements.txt                # Dependencias
-├── .env                            # Variables de entorno (ignorado por Git)
-├── examples/
-│   ├── node-event.json             # Evento de ejemplo: instancia detenida
-│   └── bucket-event.json           # Evento de ejemplo: tags faltantes
-├── data/
-│   ├── inventory.json              # Inventario de recursos (generado por setup-demo)
-│   └── events.json                 # Ledger durable de eventos procesados
-├── logs/                           # Logs JSONL rotativos por proceso
-├── src/fenix/
-│   ├── cli.py                      # Punto de entrada CLI (argparse)
-│   ├── config/
-│   │   └── settings.py             # Fábrica de clientes Boto3 → localhost:4566
-│   ├── services/
-│   │   ├── cloud_support.py        # Recetas Boto3 (create_bucket, create_instance, etc.)
-│   │   ├── demo.py                 # Provisión de infraestructura mock e inventario
-│   │   ├── events.py               # Validación de esquema cerrado y fingerprint
-│   │   ├── notifications.py        # Notificaciones (Telegram / console)
-│   │   ├── receiver.py             # Receptor FastAPI (webhook firmado → SQS)
-│   │   ├── remediation.py          # Reparación convergente + ledger durable
-│   │   ├── sqs.py                  # Mensajería SQS (colas, publish, receive, retry)
-│   │   └── worker.py               # Bucle de consumo: receive → handler → ACK/retry
-│   └── utils/
-│       ├── crypto.py               # HMAC-SHA256 (firma y verificación)
-│       ├── errors.py               # Jerarquía de excepciones del proyecto
-│       ├── logging_json.py         # Logger JSON asíncrono con rotación gzip
-│       ├── state.py                # Persistencia atómica (load/save con os.replace)
-│       └── validation.py           # Validadores puros (identifier, ttl, utc)
-├── tests/
-│   ├── test_base.py                # Tests del apoyo entregado
-│   ├── test_contracts.py           # Contratos de validación
-│   ├── test_fenix.py               # Tests generales
-│   ├── test_i1_events.py           # Tests de eventos (I1)
-│   ├── test_i1_validation.py       # Tests de validación (I1)
-│   ├── test_integracion.py         # Tests de integración con LocalStack
-│   ├── test_logging_f16.py         # Tests de logging y rotación
-│   ├── test_notifications.py       # Tests de notificaciones
-│   ├── test_remediation.py         # Tests de remediación
-│   ├── test_scenarios.py           # Escenarios de integración (I6)
-│   ├── test_webhook.py             # Tests del receptor HTTP
-│   └── test_worker.py              # Tests del worker
-├── docs/
-│   └── I1_entradas_y_excepciones.md
-├── scripts/
-│   └── evidencia_i1.py
-├── Evidencias_i2/                  # Capturas de evidencia del integrante 2
-└── Evidencias_i4/                  # Capturas de evidencia del integrante 4
-```
-
----
-
-## Módulos por Integrante
-
-### Integrante 2: Mensajería SQS e inventario cloud
-
-El módulo `fenix.services.sqs` gestiona las colas estándar SQS contra LocalStack: `ensure_queues` crea la DLQ con retención de 14 días, la cola principal con `VisibilityTimeout=45` y retención de 4 días, y vincula la `RedrivePolicy` (`maxReceiveCount=3`) mediante `set_queue_attributes` para garantizar idempotencia. `retry_later` aplica backoff exponencial (`min(30, 2^count)`) exclusivamente con `change_message_visibility` sobre el `ReceiptHandle` vigente, sin re-publicar el mensaje.
-
-El módulo `fenix.services.demo` provisiona la infraestructura mock: descubre VPC e imagen del emulador, crea o reutiliza Security Group, instancia EC2 (con `ClientToken` estable) y bucket S3, aplica las cuatro etiquetas obligatorias (`ManagedBy=ppa2`, `Project=fenix`, `GroupId`, `Owner`) y persiste atómicamente el inventario en `data/inventory.json`. Tres funciones auxiliares privadas (`_find_instance_by_tags`, `_find_sg_by_name`, `_bucket_exists`) garantizan idempotencia sin duplicar recursos.
-
-### Integrante 4: Logging estructurado
+## Integrante 4: logging estructurado
 
 El módulo `fenix.utils.logging_json` configura un logger JSON asíncrono para cada proceso. Escribe archivos JSONL en `logs/`, incluye marca de tiempo UTC y campos de contexto permitidos, y rota los archivos al alcanzar 2 MiB. Conserva hasta tres históricos comprimidos en gzip. La cola en memoria desacopla la escritura en disco; no reemplaza a SQS.
 
@@ -312,30 +121,25 @@ La CLI inicializa un logger por comando y detiene su listener al salir. Para pro
 python -m pytest tests/test_logging_f16.py -q
 ```
 
----
+El adaptador de Telegram trata timeout, conexión, HTTP 429 y 5xx como transitorios.
+Si la respuesta incluye `Retry-After`, espera ese tiempo hasta un máximo de 30 segundos;
+después propaga el error para que el worker/SQS administre el siguiente intento. Un
+`Retry-After` inválido se ignora y el error transitorio se conserva.
 
-## Matriz de Pruebas y Evidencias de Validación
+### Evidencias y matriz del Integrante 4
 
-La siguiente tabla documenta las pruebas de validación ejecutadas contra LocalStack y sus correspondientes evidencias.
+| ID | Fecha | Comando o procedimiento | Resultado |
+| --- | --- | --- | --- |
+| F14 | 12-11-2026 | Reintentar el aviso 429 y luego publicar la reparación exitosa; repetir el evento | El aviso fallido no vuelve a ejecutar la reparación y el reintento termina con un único aviso confirmado. Cobertura: `tests/test_remediation.py::test_f14_notice_429_then_success_without_new_repair`. |
+| F16 | 20-11-2026 | `PYTHONPATH=src python3 -m pytest tests/test_logging_f16.py tests/test_notifications.py tests/test_base.py -q` | 26 pruebas aprobadas. Se verifican rotación gzip, JSONL válido, contexto permitido, reintentos Telegram y configuración controlada. |
 
-| #         | Caso de Prueba                                           | Comandos Ejecutados                                                                                                                                                                              | Descripción Técnica                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Evidencia                                                                                                    |
-| --------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **F01**   | **Idempotencia en la Inicialización e Inventario**       | Ejecución consecutiva repetida de `python -m fenix.cli init-queues` y `python -m fenix.cli setup-demo`                                                                                           | Se validó que el sistema cumple con la propiedad de idempotencia. Ante múltiples ejecuciones consecutivas, el script no duplica infraestructura ni sobrescribe identidades: conserva exactas las mismas URLs de colas SQS (`fenix-grupo01-events` y `fenix-grupo01-dlq`), el mismo `InstanceId` en EC2 (`i-2805dc15ac3d81245`), el mismo `SecurityGroupId` (`sg-2bce32e9525845b58`) y el mismo bucket S3 (`fenix-grupo01-demo`). Además, genera consistentemente el manifiesto de inventario en `data/inventory.json`.                                                    | [`evidencias-F01idempotencia_init_setup.png`](Evidencias_i2/evidencias-F01idempotencia_init_setup.png)       |
-| **F10-A** | **Reintentos con Backoff Exponencial en el Worker**      | Worker corriendo con `python -u -m fenix.cli worker` e inyección de evento con `simulate_failures: 5` y `event_id` nuevo (`evt-node-003`). Monitoreo con `Get-Content logs\fenix-worker-*.jsonl` | Se comprobó que el worker detecta eventos no procesados y aplica una estrategia de backoff exponencial ante fallas persistentes simuladas. En los logs estructurados JSONL se evidencian las tres instancias incrementales de postergación de visibilidad (`"reintento_programado en 2 s"`, `"reintento_programado en 4 s"`, `"reintento_programado en 8 s"`) asociadas a los contadores `attempt: 1`, `attempt: 2` y `attempt: 3`. Tras alcanzar la falla simulada 3 de 5, el worker detiene los reintentos en la cola principal registrando el estado `"sin_mensajes"`. | [`evidencias-F10_worker_reintentos_backoff.png`](Evidencias_i2/evidencias-F10_worker_reintentos_backoff.png) |
-| **F10-B** | **Aislamiento y Consulta en la Dead Letter Queue (DLQ)** | Consulta mediante Boto3 a la DLQ: `sqs.receive_message(QueueUrl='.../fenix-grupo01-dlq')`                                                                                                        | Se verificó que SQS aisló automáticamente el mensaje en la DLQ (`fenix-grupo01-dlq`) después de superar la cantidad máxima de intentos (`maxReceiveCount = 3`) en la cola principal. La lectura demuestra que el payload original se conserva íntegro para posterior análisis/replay (con `ApproximateReceiveCount >= 3`) sin haber sido eliminado de forma destructiva por el worker.                                                                                                                                                                                    | [`evidencias-F10_lectura_dlq_aws_cli.png`](Evidencias_i2/evidencias-F10_lectura_dlq_aws_cli.png)             |
+La configuración real de Telegram deja el proveedor en `console` mientras no existan
+`TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID`. Con Telegram configurado, el texto recibido
+por el canal confirma el resultado de la reparación y se limita a 1000 caracteres.
 
----
+Captura real de comunicación: [Alerta Telegram — 12-11-2026](Evidencias_i4/Captura%20de%20pantalla%202026-11-12%20a%20la(s)%206.28.27%E2%80%AFp.%E2%80%AFm..png).
+La captura muestra el aviso enviado por el bot Tita al chat después de restaurar
+`node-01` al estado `running`.
 
-## Restricciones Técnicas del TP
-
-| Restricción                                     | Implementación                                                                          |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Sin `except: pass` ni `BaseException`           | Solo capturas específicas de `ClientError`, `BotoCoreError`, `ProjectError` y subclases |
-| Sin `return`/`break`/`continue` en `finally`    | Verificado en todos los módulos                                                         |
-| Endpoint exclusivo `localhost:4566`             | Validado en `config/settings.py` con `urlparse`                                         |
-| Sin credenciales reales de AWS                  | Variables ficticias (`test`/`test`) para LocalStack                                     |
-| Type hints en parámetros y retornos             | Todas las funciones públicas anotadas                                                   |
-| Docstrings con Args/Returns/Raises/Side Effects | Formato consistente en todo el proyecto                                                 |
-| Persistencia atómica                            | `state.save` usa `os.replace` en el mismo filesystem                                    |
-| Nunca `send_message` en `retry_later`           | Solo `change_message_visibility` para no reiniciar `ApproximateReceiveCount`            |
-| ACK solo tras éxito durable                     | `acknowledge` se llama únicamente después de que el handler persista todas las etapas   |
+Esta evidencia puede mostrarse junto con el video de defensa y la salida de las
+pruebas F14/F16.
