@@ -10,7 +10,7 @@ from fenix.utils.errors import PermanentError, RetryableError
 
 
 def _wait_retry_after(response: requests.Response) -> None:
-    """Wait for Retry-After, capped at 30 seconds; ignore malformed values."""
+    """Espera según Retry-After, limitado a 30 segundos; ignora valores malformados."""
     headers = getattr(response, "headers", None)
     value = headers.get("Retry-After") if headers else None
     if not value:
