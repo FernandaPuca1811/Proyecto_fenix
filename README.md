@@ -1,5 +1,8 @@
 # Plantillas del proyecto Fenix
 
+Link de defensa en youtube: https://www.youtube.com/watch?v=ojaDcjFT7wA
+
+
 Leer Guia.md o la consigna PDF antes de ejecutar. Este es un punto de partida didáctico: los TODO y NotImplementedError son tareas del equipo, no una aplicación terminada.
 
 ## Inicio
@@ -43,3 +46,21 @@ El adaptador de Telegram trata timeout, conexión, HTTP 429 y 5xx como transitor
 Si la respuesta incluye `Retry-After`, espera ese tiempo hasta un máximo de 30 segundos;
 después propaga el error para que el worker/SQS administre el siguiente intento. Un
 `Retry-After` inválido se ignora y el error transitorio se conserva.
+
+### Evidencias y matriz del Integrante 4
+
+| ID | Fecha | Comando o procedimiento | Resultado |
+| --- | --- | --- | --- |
+| F14 | 12-11-2026 | Reintentar el aviso 429 y luego publicar la reparación exitosa; repetir el evento | El aviso fallido no vuelve a ejecutar la reparación y el reintento termina con un único aviso confirmado. Cobertura: `tests/test_remediation.py::test_f14_notice_429_then_success_without_new_repair`. |
+| F16 | 20-11-2026 | `PYTHONPATH=src python3 -m pytest tests/test_logging_f16.py tests/test_notifications.py tests/test_base.py -q` | 26 pruebas aprobadas. Se verifican rotación gzip, JSONL válido, contexto permitido, reintentos Telegram y configuración controlada. |
+
+La configuración real de Telegram deja el proveedor en `console` mientras no existan
+`TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID`. Con Telegram configurado, el texto recibido
+por el canal confirma el resultado de la reparación y se limita a 1000 caracteres.
+
+Captura real de comunicación: [Alerta Telegram — 12-11-2026](Evidencias_i4/Captura%20de%20pantalla%202026-11-12%20a%20la(s)%206.28.27%E2%80%AFp.%E2%80%AFm..png).
+La captura muestra el aviso enviado por el bot Tita al chat después de restaurar
+`node-01` al estado `running`.
+
+Esta evidencia puede mostrarse junto con el video de defensa y la salida de las
+pruebas F14/F16.

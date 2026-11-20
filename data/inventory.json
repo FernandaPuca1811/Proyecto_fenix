@@ -1,0 +1,23 @@
+{
+  "node-01": {
+    "type": "ec2",
+    "id": "i-80d316e3b2d63d275",
+    "security_group_id": "sg-6c68fb5825f730f70",
+    "expected_tags": {
+      "ManagedBy": "ppa2",
+      "Project": "fenix",
+      "GroupId": "grupo01",
+      "Owner": "grupo01"
+    }
+  },
+  "bucket-01": {
+    "type": "s3",
+    "id": "fenix-grupo01-demo",
+    "expected_tags": {
+      "ManagedBy": "ppa2",
+      "Project": "fenix",
+      "GroupId": "grupo01",
+      "Owner": "grupo01"
+    }
+  }
+}
