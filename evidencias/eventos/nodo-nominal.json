@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "event_type": "instance.stopped",
+  "resource_id": "node-01",
+  "occurred_at": "2026-11-21T00:43:04Z",
+  "simulate_failures": 0,
+  "event_id": "evt-nodo-0043"
+}

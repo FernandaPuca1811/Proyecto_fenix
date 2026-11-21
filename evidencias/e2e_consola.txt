@@ -1,0 +1,51 @@
+$ python -m fenix.cli init-queues
+('http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/fenix-grupo01-events', 'http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/fenix-grupo01-dlq')
+[exit 0]
+
+$ python -m fenix.cli setup-demo
+{'node-01': {'type': 'ec2', 'id': 'i-06564d1541a309ee0', 'security_group_id': 'sg-da838013b383c3230', 'expected_tags': {'ManagedBy': 'ppa2', 'Project': 'fenix', 'GroupId': 'grupo01', 'Owner': 'grupo01'}}, 'bucket-01': {'type': 's3', 'id': 'fenix-grupo01-demo', 'expected_tags': {'ManagedBy': 'ppa2', 'Project': 'fenix', 'GroupId': 'grupo01', 'Owner': 'grupo01'}}}
+[exit 0]
+
+$ python -m fenix.cli fault node-01
+
+[exit 0]
+
+$ python -m fenix.cli send evidencias\eventos\nodo-nominal.json
+202 {"status":"accepted","event_id":"evt-nodo-0043","message_id":"629b93d8-5a72-4ec8-8567-a80465d08a8c"}
+[exit 0]
+
+# verificado: nodo nominal completed
+
+$ python -m fenix.cli fault bucket-01
+
+[exit 0]
+
+$ python -m fenix.cli send evidencias\eventos\bucket-nominal.json
+202 {"status":"accepted","event_id":"evt-bucket-0043","message_id":"b19065ab-623b-4a8d-937f-66a40d33dfce"}
+[exit 0]
+
+# verificado: bucket completed
+
+$ python -m fenix.cli fault node-01
+
+[exit 0]
+
+$ python -m fenix.cli send evidencias\eventos\nodo-backoff.json
+202 {"status":"accepted","event_id":"evt-backoff-0043","message_id":"49b9834c-1cab-41f7-9c12-7b0b2b6ec0e5"}
+[exit 0]
+
+# verificado: backoff completed
+
+$ python -m fenix.cli send evidencias\eventos\nodo-dlq.json
+202 {"status":"accepted","event_id":"evt-dlq-0043","message_id":"e24affff-300b-40de-9c40-0cc8d47f6a9e"}
+[exit 0]
+
+$ python -m fenix.cli send evidencias\eventos\nodo-conflicto.json
+202 {"status":"accepted","event_id":"evt-nodo-0043","message_id":"13b82479-f9f7-46a5-8ee6-c5b3e11d9b51"}
+[exit 0]
+
+$ send_message directo a SQS con Body corrupto (F08)
+
+# verificado: F08, F10 y F15 en la DLQ
+
+# salida del worker (avisos en modo console)
