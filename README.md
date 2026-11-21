@@ -306,6 +306,169 @@ tp-final/
 
 ## Módulos por Integrante
 
+### Integrante 1: Entradas y excepciones
+
+Es la **puerta de entrada** del sistema: decide si un evento es aceptable *antes* de publicarlo en SQS o de tocar un recurso. Todo dato externo se trata como no confiable. `events.validate` se ejecuta **dos veces**: en el receptor (un `ValidationError` se traduce en `422` y no se publica nada) y de nuevo en el worker, porque un mensaje puede llegar a SQS sin pasar por HTTP (F08). Ahí es una falla permanente: no hay ACK y la `RedrivePolicy` lo aísla en la DLQ.
+
+| Archivo | Contenido |
+| --- | --- |
+| `src/fenix/utils/validation.py` | `identifier`, `ttl_seconds`, `utc_text`: validadores puros de valores sueltos |
+| `src/fenix/services/events.py` | `validate` (contrato cerrado del evento) y `fingerprint` (huella SHA-256 del contenido) |
+| `src/fenix/utils/errors.py` | Revisión de la jerarquía y de cuándo se usa cada excepción |
+| `tests/test_i1_validation.py`, `test_i1_events.py`, `test_i1_garantias.py` | 367 casos (52 funciones de prueba), 100 % de cobertura de líneas y ramas |
+| `scripts/evidencia_i1.py` | Un evento correcto y tres rechazos, sin publicación |
+| [`docs/I1_entradas_y_excepciones.md`](docs/I1_entradas_y_excepciones.md) | Detalle, decisiones de diseño y preparación de la defensa |
+
+**Contrato de cada función** (la excepción es siempre `ValidationError`):
+
+| Función | Entra | Sale | Rechaza cuando |
+| --- | --- | --- | --- |
+| `identifier(value)` | cualquier valor | el mismo texto, sin normalizar | no es `str` o no cumple `[a-z0-9-]{3,32}` (`fullmatch`) |
+| `ttl_seconds(value)` | texto | `int` de 60 a 600 | no son solo dígitos ASCII o está fuera de rango |
+| `utc_text(value)` | texto ISO 8601 | `datetime` con zona UTC | forma ambigua, sin zona, offset distinto de cero (p. ej. `-03:00`) o fecha inexistente |
+| `validate(event, inventory)` | `dict` del evento y `dict` del inventario | copia validada (solo `int` y `str`) | incumple el contrato ([reglas por campo](#evento-contrato-cerrado)) |
+| `fingerprint(event)` | evento ya validado | SHA-256 hexadecimal del JSON canónico | — (`TypeError` si no es serializable) |
+
+**Cómo funciona `validate`**, en este orden (cada compuerta rechaza un tipo de problema):
+
+1. El evento es un `dict` (una lista JSON es JSON válido pero no un evento: `422`, no `400`) y el inventario también (falla cerrada).
+2. Las claves son exactamente las seis del contrato. Se nombran las que **faltan**; de las sobrantes solo se informa **cuántas**, porque su nombre lo controla quien envía.
+3. `schema_version` y `simulate_failures` son enteros exactos (`type(x) is int`: `True == 1` y `bool` hereda de `int`).
+4. `event_id` y `resource_id` pasan por `identifier`, `occurred_at` por `utc_text`, y `event_type` es uno de los dos permitidos (se comprueba `str` antes del `in`: una lista no es hashable y lanzaría `TypeError`).
+5. `resource_id` es un **alias** presente en el inventario. Un `InstanceId` real cumple el patrón de `identifier`, pero no es clave del inventario, así que se rechaza.
+6. El tipo del evento coincide con el del recurso: `instance.stopped` con `ec2`, `bucket.tags_missing` con `s3`.
+7. Devuelve `dict(event)`: una copia independiente y serializable a JSON.
+
+<details>
+<summary>Ver el código de <code>identifier</code>, <code>ttl_seconds</code> y <code>utc_text</code></summary>
+
+```python
+def identifier(value: str) -> str:
+    if not isinstance(value, str):  # Un número, None o una lista no son identificadores.
+        raise ValidationError("identifier debe ser texto")
+    if _IDENTIFIER.fullmatch(value) is None:  # Cubre longitud, alfabeto y saltos de línea.
+        raise ValidationError("identifier debe cumplir [a-z0-9-]{3,32}")
+    return value  # Se devuelve el mismo texto: la identidad no cambia.
+
+def ttl_seconds(value: str) -> int:
+    if not isinstance(value, str):  # La CLI entrega texto; otro tipo es un error de uso.
+        raise ValidationError("ttl debe ser un entero en texto")
+    if _TTL_TEXT.fullmatch(value) is None:  # Rechaza decimales, negativos y vacío.
+        raise ValidationError("ttl debe contener solo dígitos")
+    try:  # La conversión sigue siendo falible: ver Notes.
+        ttl = int(value)
+    except ValueError as error:  # Se conserva la causa original (sin datos sensibles).
+        raise ValidationError("ttl no pudo convertirse a entero") from error
+    if not TTL_MIN <= ttl <= TTL_MAX:  # Ambos extremos están incluidos.
+        raise ValidationError(f"ttl debe estar entre {TTL_MIN} y {TTL_MAX} segundos")
+    return ttl
+
+def utc_text(value: str) -> datetime:
+    if not isinstance(value, str):  # fromisoformat lanzaría TypeError con otro tipo.
+        raise ValidationError("occurred_at debe ser texto")
+    match = _ISO_UTC.fullmatch(value)  # Fija la forma antes de interpretarla.
+    if match is None:
+        raise ValidationError("fecha con formato ISO 8601 inválido")
+    if match.group("zone") is None:  # Sin Z ni offset: no hay forma segura de comparar.
+        raise ValidationError("la fecha debe indicar zona UTC explícita")
+    text = value[:-1] + "+00:00" if value.endswith("Z") else value  # Z -> +00:00.
+    try:  # El patrón no valida el calendario: el mes 13 o el día 31 de abril llegan aquí.
+        parsed = datetime.fromisoformat(text)
+    except ValueError as error:
+        raise ValidationError("fecha inexistente o fuera de rango") from error
+    if parsed.utcoffset() != timedelta(0):  # Ej. -03:00: válida, pero no es UTC.
+        raise ValidationError("la fecha debe estar en UTC (offset +00:00)")
+    return parsed.astimezone(timezone.utc)  # Normaliza al objeto timezone.utc.
+```
+
+</details>
+
+<details>
+<summary>Ver el código de <code>validate</code> y <code>fingerprint</code></summary>
+
+```python
+def _strict_int(field: str, value, low: int, high: int) -> int:
+    if type(value) is not int:  # Rechaza True/False, 1.0, "1" y None.
+        raise ValidationError(f"{field} debe ser un entero (no bool ni decimal)")
+    if not low <= value <= high:
+        raise ValidationError(f"{field} debe estar entre {low} y {high}")
+    return value
+
+def validate(event: dict, inventory: dict) -> dict:
+    if not isinstance(event, dict):  # Una lista, texto o null JSON son JSON válido, no un evento.
+        raise ValidationError("El evento debe ser un objeto JSON")
+    if not isinstance(inventory, dict):  # Falla cerrada: sin inventario no se autoriza nada.
+        raise ValidationError("Inventario no disponible o con formato inválido")
+
+    keys = set(event)  # Contrato cerrado: se comparan los conjuntos de claves.
+    missing = EVENT_FIELDS - keys
+    if missing:
+        raise ValidationError("Faltan campos: " + ", ".join(sorted(missing)))
+    extra = keys - EVENT_FIELDS
+    if extra:  # Solo se informa la cantidad: los nombres los controla el remitente.
+        raise ValidationError(f"Campos no permitidos en el evento: {len(extra)}")
+
+    version = event["schema_version"]
+    if type(version) is not int or version != SCHEMA_VERSION:  # type(): excluye True.
+        raise ValidationError(f"schema_version debe ser el entero {SCHEMA_VERSION}")
+    _check("event_id", identifier, event["event_id"])
+    event_type = event["event_type"]
+    # isinstance antes del "in": una lista o dict como clave lanzaría TypeError (no hashable).
+    if not isinstance(event_type, str) or event_type not in EVENT_RESOURCE_TYPES:
+        raise ValidationError("event_type no admitido")
+    resource_id = _check("resource_id", identifier, event["resource_id"])
+    _check("occurred_at", utc_text, event["occurred_at"])
+    _strict_int("simulate_failures", event["simulate_failures"], 0, MAX_SIMULATED_FAILURES)
+
+    resource = inventory.get(resource_id)  # Solo aliases presentes en el inventario.
+    if not isinstance(resource, dict):
+        raise ValidationError("resource_id no pertenece al inventario autorizado")
+    if resource.get("type") != EVENT_RESOURCE_TYPES[event_type]:  # ec2 <-> stopped, s3 <-> tags.
+        raise ValidationError("event_type incompatible con el tipo del recurso")
+    return dict(event)  # Copia superficial: todos los valores validados son int o str.
+
+def fingerprint(event: dict) -> str:
+    canonical = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()  # ASCII: ensure_ascii=True.
+```
+
+</details>
+
+**Decisiones de diseño**
+
+| Decisión | Por qué |
+| --- | --- |
+| `fullmatch`, no `match` | Con `match` y `$`, `"abc\n"` pasaría: `$` acepta un salto de línea final |
+| No normalizar identificadores | `AJENO` y `ajeno` serían la misma identidad; se rechaza en lugar de adivinar |
+| Regex de dígitos antes de `int()` | `int()` acepta `" 60 "`, `"+60"`, `"6_0"` y dígitos árabes. El `try/except` se mantiene: Python limita la conversión a 4300 dígitos y lanza `ValueError` |
+| Forma ISO fijada antes de `fromisoformat` | `fromisoformat` tolera variantes ambiguas (espacio en lugar de `T`, formato básico); un offset como `-03:00` es válido pero no UTC |
+| Mensajes sin copiar la entrada | Valores y nombres de claves los controla quien envía: podrían filtrar secretos o falsear líneas de log |
+| Función pura y una única excepción pública | `validate` no escribe en `data/`; un `ValueError` suelto lo tomaría el worker como estado local roto y se detendría |
+
+**Garantías para el receptor y el worker**, fijadas en `tests/test_i1_garantias.py`:
+
+- La copia devuelta es serializable a JSON (`occurred_at` sigue siendo texto) y se publica y guarda en el ledger sin transformarla.
+- Ante cualquier entrada inválida solo sale `ValidationError`: se comprueba con 20 000 entradas hostiles generadas con semilla fija.
+- Los mensajes describen la regla y no reproducen la entrada (el receptor los devuelve en el `422`).
+- `validate` no toca el disco. El conflicto de un mismo `event_id` con otro contenido (F15) lo detecta el worker comparando la huella de `fingerprint` guardada en el ledger.
+
+**Pruebas y evidencia**
+
+```bash
+python -m pytest -m i1 -q          # 367 casos, sin LocalStack
+python scripts/evidencia_i1.py     # un evento correcto y tres rechazos; 1 publicación simulada
+```
+
+Verificado en Python 3.11, 3.12 y 3.14. Además de la cobertura (100 % de líneas y ramas), se rompieron a propósito 28 reglas del código y las pruebas detectaron todas: la cobertura mide qué líneas se ejecutan, la prueba de mutación comprueba que las pruebas realmente verifican algo.
+
+| ID | Prueba o evidencia |
+| --- | --- |
+| F06 | `test_i1_events.py::test_rejects_json_values_that_are_not_objects` (lista JSON: `422`, no `400`) |
+| F07 | `test_i1_events.py::test_rejects_resource_not_in_inventory`, `test_rejects_extra_key`; `scripts/evidencia_i1.py` |
+| F15 | `test_i1_events.py::test_fingerprint_changes_with_any_field` (otro contenido, otra huella) |
+
+> **Límites:** `scripts/evidencia_i1.py` usa un publicador simulado que solo cuenta llamadas; demuestra que un evento rechazado nunca llega a la publicación. La prueba contra el receptor real (`422` y la cola sin mensajes nuevos) está en `tests/test_webhook.py`.
+
 ### Integrante 2: Mensajería SQS e inventario cloud
 
 El módulo `fenix.services.sqs` gestiona las colas estándar SQS contra LocalStack: `ensure_queues` crea la DLQ con retención de 14 días, la cola principal con `VisibilityTimeout=45` y retención de 4 días, y vincula la `RedrivePolicy` (`maxReceiveCount=3`) mediante `set_queue_attributes` para garantizar idempotencia. `retry_later` aplica backoff exponencial (`min(30, 2^count)`) exclusivamente con `change_message_visibility` sobre el `ReceiptHandle` vigente, sin re-publicar el mensaje.

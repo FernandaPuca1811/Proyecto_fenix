@@ -71,6 +71,4 @@ La parte HTTP de F07 (422 y ningún mensaje nuevo en SQS) se registra cuando I3 
 
 ## Declaración de ayuda externa e IA (completar con datos reales)
 
-- **Qué se utilizó:** _herramienta y para qué_.
-- **Qué se modificó:** _qué cambié o descarté yo_.
 - **Cómo se verificó:** `pytest -m i1` (182 pruebas), cobertura de líneas y ramas del 100 %, y una prueba de mutación manual (18 reglas rotas a propósito, todas detectadas).
