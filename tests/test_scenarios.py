@@ -2,10 +2,16 @@
 import importlib  # Recarga remediation para representar un proceso nuevo.
 import json  # Serializa el Body de la entrega simulada.
 import logging  # Logger mínimo para run().
+import time  # Deadline total del ensayo de redrive.
+import urllib.request  # Comprueba que LocalStack esté disponible.
+import uuid  # Prefijo de colas exclusivo de cada ejecución.
 import pytest  # Mantiene visibles los casos sin implementar.
-from fenix.services import remediation, worker
+from fenix.config.settings import client
+from fenix.services import remediation, sqs, worker
 from fenix.utils.errors import RetryableError
 from fenix.utils.state import load, save
+
+REDRIVE_DEADLINE = 120  # Segundos máximos para observar el mensaje en la DLQ.
 
 
 class CountingEC2:
@@ -98,14 +104,39 @@ def test_redrive_with_localstack():
     Returns:
         None si un mensaje venenoso termina en la DLQ y el worker sigue vivo.
     Raises:
-        NotImplementedError: Hasta implementar el ensayo con espera total acotada.
+        AssertionError: Si el Body no aparece en la DLQ dentro de 120 s.
     Side Effects:
         Crea colas de prueba exclusivas y las limpia después de guardar evidencia.
     Notes:
         Usar un prefijo de test nuevo y no purgar colas del laboratorio del grupo.
+        La evidencia (MessageId, Body y recepciones) se imprime; ver con pytest -rP.
     """
-    # TODO I6-D: publicar JSON corrupto en una cola con RedrivePolicy real.
-    # Consumir con el worker y consultar DLQ con deadline total de 120 segundos.
-    # Comparar el Body original; un contador aproximado por sí solo no demuestra redrive.
-    # Si se agota el deadline, fallar con diagnóstico; no pasar el test por timeout.
-    raise NotImplementedError("I6-D: verificar redrive real en LocalStack")
+    try:  # Sin emulador no hay broker que probar.
+        with urllib.request.urlopen("http://localhost:4566/_localstack/health", timeout=2):
+            pass
+    except OSError:
+        pytest.skip("LocalStack no disponible en localhost:4566")
+    sqs_client = client("sqs")
+    work, dlq = sqs.ensure_queues(f"test-redrive-{uuid.uuid4().hex[:8]}")  # RedrivePolicy real.
+    body = '{"event_id": "evt-veneno", '  # JSON corrupto inyectado sin pasar por HTTP.
+    handled = []  # El handler nunca debe recibir un Body corrupto.
+    logger = logging.getLogger("test-redrive")
+    try:
+        sent = sqs_client.send_message(QueueUrl=work, MessageBody=body)["MessageId"]
+        limit = time.monotonic() + REDRIVE_DEADLINE
+        found = None
+        while found is None:
+            assert time.monotonic() < limit, (
+                f"El mensaje {sent} no llegó a la DLQ en {REDRIVE_DEADLINE} s")
+            worker.run(work, handled.append, logger, once=True)  # El worker sigue vivo.
+            response = sqs_client.receive_message(  # Lectura sin borrar ni ocultar.
+                QueueUrl=dlq, MaxNumberOfMessages=10, WaitTimeSeconds=1, VisibilityTimeout=0,
+                MessageSystemAttributeNames=["ApproximateReceiveCount"])
+            found = next((m for m in response.get("Messages", []) if m["Body"] == body), None)
+        assert handled == []  # Nunca llegó al negocio ni se confirmó.
+        print(json.dumps({"evidencia": "dlq", "message_id_enviado": sent,
+                          "message_id_dlq": found["MessageId"], "body": found["Body"],
+                          "recepciones": found["Attributes"]["ApproximateReceiveCount"]}))
+    finally:  # Solo se borran las colas creadas por este ensayo.
+        for url in (work, dlq):
+            sqs_client.delete_queue(QueueUrl=url)
