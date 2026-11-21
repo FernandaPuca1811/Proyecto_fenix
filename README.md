@@ -475,6 +475,16 @@ El módulo `fenix.services.sqs` gestiona las colas estándar SQS contra LocalSta
 
 El módulo `fenix.services.demo` provisiona la infraestructura mock: descubre VPC e imagen del emulador, crea o reutiliza Security Group, instancia EC2 (con `ClientToken` estable) y bucket S3, aplica las cuatro etiquetas obligatorias (`ManagedBy=ppa2`, `Project=fenix`, `GroupId`, `Owner`) y persiste atómicamente el inventario en `data/inventory.json`. Tres funciones auxiliares privadas (`_find_instance_by_tags`, `_find_sg_by_name`, `_bucket_exists`) garantizan idempotencia sin duplicar recursos.
 
+### Integrante 4: Logging estructurado
+
+El módulo `fenix.utils.logging_json` configura un logger JSON asíncrono para cada proceso. Escribe archivos JSONL en `logs/`, incluye marca de tiempo UTC y campos de contexto permitidos, y rota los archivos al alcanzar 2 MiB. Conserva hasta tres históricos comprimidos en gzip. La cola en memoria desacopla la escritura en disco; no reemplaza a SQS.
+
+La CLI inicializa un logger por comando y detiene su listener al salir. Para probar la rotación y comprobar que el histórico gzip contiene líneas JSON válidas:
+
+```bash
+python -m pytest tests/test_logging_f16.py -q
+```
+
 ---
 
 ## Matriz de Pruebas y Evidencias de Validación
@@ -568,12 +578,12 @@ I5 demostración integral).
 
 | Rol | Apellido y nombre | Correo | Módulos | Pruebas que defiende |
 | --- | --- | --- | --- | --- |
-| I1 · Entradas y excepciones | _completar_ | _completar_ | `utils/validation.py`, `services/events.py` (`validate`, `fingerprint`), revisión de `utils/errors.py` | `test_i1_validation.py`, `test_i1_events.py`, `test_contracts.py`, `scripts/evidencia_i1.py` · F06, F07 |
-| I2 · Mensajería e inventario cloud | _completar_ | _completar_ | `services/sqs.py` (`ensure_queues`, `retry_later`), `services/demo.py` (`setup_demo` y sus auxiliares) | Capturas de [`Evidencias_i2/`](Evidencias_i2/); su código se ejercita también en `test_integracion.py` y `test_scenarios.py::test_redrive_with_localstack` · F01, F08, F10 |
-| I3 · Webhooks y reparación | _completar_ | _completar_ | `utils/crypto.py` (`verify`), `services/receiver.py`, `services/remediation.py` (`repair`) | `test_webhook.py`, `test_remediation.py` (clases `TestRepair*` y pruebas `localstack`), `test_fenix.py` · F02–F06, F13 |
-| I4 · Observabilidad y comunicación | _completar_ | _completar_ | `utils/logging_json.py`, `services/notifications.py` (Telegram) | `test_logging_f16.py`, `test_notifications.py`, `test_base.py` · F14, F16 |
-| I5 · Integración y worker | _completar_ | _completar_ | `services/worker.py` (`run`), `services/remediation.py` (`handle`), revisión de `cli.py` | `test_worker.py`, `test_remediation.py` (pruebas `f02`–`f15`), `test_scenarios.py`, `test_integracion.py` · F08–F12, F14, F15 |
-| I6 · Pruebas y diagnóstico (repartido) | — | — | `demo.inject_fault`, `scripts/limpiar_laboratorio.py` | `test_inject_fault.py`, `test_scenarios.py::test_redrive_with_localstack` |
+| I1 · Entradas y excepciones | Orozco, Eliseo Jesús | eliseorozcow@gmail.com | `utils/validation.py`, `services/events.py` (`validate`, `fingerprint`), revisión de `utils/errors.py` | `test_i1_validation.py`, `test_i1_events.py`, `test_contracts.py`, `scripts/evidencia_i1.py` · F06, F07 |
+| I2 · Mensajería e inventario cloud | Puca Arenas, Fernanda Alejandra | pucafernanda18@gmail.com | `services/sqs.py` (`ensure_queues`, `retry_later`), `services/demo.py` (`setup_demo` y sus auxiliares) | Capturas de [`Evidencias_i2/`](Evidencias_i2/); su código se ejercita también en `test_integracion.py` y `test_scenarios.py::test_redrive_with_localstack` · F01, F08, F10 |
+| I3 · Webhooks y reparación | Gutierrez, Ivan Gonzalo | guiru3711@gmail.com | `utils/crypto.py` (`verify`), `services/receiver.py`, `services/remediation.py` (`repair`) | `test_webhook.py`, `test_remediation.py` (clases `TestRepair*` y pruebas `localstack`), `test_fenix.py` · F02–F06, F13 |
+| I4 · Observabilidad y comunicación | Miranda, Maria Natalia | natumiranda.28@gmail.com | `utils/logging_json.py`, `services/notifications.py` (Telegram) | `test_logging_f16.py`, `test_notifications.py`, `test_base.py` · F14, F16 |
+| I5 · Integración y worker | Gutierrez, Ivan Gonzalo | guiru3711@gmail.com | `services/worker.py` (`run`), `services/remediation.py` (`handle`), revisión de `cli.py` | `test_worker.py`, `test_remediation.py` (pruebas `f02`–`f15`), `test_scenarios.py`, `test_integracion.py` · F08–F12, F14, F15 |
+| I6 · Pruebas y diagnóstico (repartido) | Gutierrez, Ivan Gonzalo (I6-A e I6-D); el resto, cada rol en sus pruebas | guiru3711@gmail.com | `demo.inject_fault`, `scripts/limpiar_laboratorio.py` | `test_inject_fault.py`, `test_scenarios.py::test_redrive_with_localstack` |
 
 ### Mapa de módulos
 
@@ -1042,16 +1052,16 @@ reescriben al usarlos.
 
 ## Video de defensa
 
-El enlace publicado figura al comienzo de este README.
+Video grupal (54:10): <https://www.youtube.com/watch?v=ojaDcjFT7wA>. Cada inicio abre el
+video en ese minuto.
 
-| Rol | Integrante | Enlace o inicio | Fin |
+| Rol | Integrante | Inicio | Fin |
 | --- | --- | --- | --- |
-| I1 · Entradas y excepciones | _completar_ | _completar_ | _mm:ss_ |
-| I2 · Mensajería e inventario | _completar_ | _completar_ | _mm:ss_ |
-| I3 · Webhooks y reparación | _completar_ | _completar_ | _mm:ss_ |
-| I4 · Observabilidad y comunicación | _completar_ | _completar_ | _mm:ss_ |
-| I5 · Integración y worker (con I6-A e I6-D) | _completar_ | _completar_ | _mm:ss_ |
-| Demostración conjunta | Todos | _completar_ | _mm:ss_ |
+| I1 · Entradas y excepciones | Orozco, Eliseo Jesús | [00:00](https://www.youtube.com/watch?v=ojaDcjFT7wA&t=0s) | 08:55 |
+| I2 · Mensajería e inventario | Puca Arenas, Fernanda Alejandra | [08:56](https://www.youtube.com/watch?v=ojaDcjFT7wA&t=536s) | 21:54 |
+| I3 · Webhooks y reparación | Gutierrez, Ivan Gonzalo | [21:55](https://www.youtube.com/watch?v=ojaDcjFT7wA&t=1315s) | 33:00 |
+| I4 · Observabilidad y comunicación | Miranda, Maria Natalia | [33:01](https://www.youtube.com/watch?v=ojaDcjFT7wA&t=1981s) | 43:29 |
+| I5 · Integración y worker, con I6-A e I6-D y la demostración integral (nominal, duplicado, backoff, DLQ, caída y reanudación) | Gutierrez, Ivan Gonzalo | [43:30](https://www.youtube.com/watch?v=ojaDcjFT7wA&t=2610s) | 54:10 |
 
 ## Registro de reproducción desde cero
 
@@ -1060,4 +1070,9 @@ entorno y su `.env` y sigue solamente este README.
 
 | Fecha | Integrante | Sistema | Instrucción que hubo que corregir |
 | --- | --- | --- | --- |
-| _completar_ | _completar_ | _completar_ | _completar_ |
+| 2026-11-20 | Gutierrez, Ivan Gonzalo | Windows 11, Python 3.14.5, Docker Desktop con LocalStack 4.14.0; clon nuevo de `main` (`75880af`) | Ninguna nueva. Se aplicaron las notas de [Versiones verificadas y notas de instalación](#versiones-verificadas-y-notas-de-instalación): la carpeta del clon es `Proyecto_fenix` (no `tp-final`) y en `.env`, copiado de `.env.example`, se cambió `AWS_ENDPOINT_URL` a `127.0.0.1` y `LOCALSTACK_IMAGE` a `4.14.0` |
+
+Resultado de esa reproducción: `pytest -m "not integracion"` 310 OK; `pytest` completo con
+LocalStack 321 OK; `init-queues`, `setup-demo`, `fault node-01`, receptor y worker en procesos
+separados y `send evidencias/eventos/nodo-nominal.json` → `202`, ledger `completed` y el nodo
+`running` consultado por Boto3.
