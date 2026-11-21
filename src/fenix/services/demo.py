@@ -1,7 +1,9 @@
 """Laboratorio acotado de recursos. Integrante 2 prepara, integrante 6 verifica."""
+import time  # Espera acotada hasta observar stopped.
 from botocore.exceptions import ClientError
 from fenix.config.settings import client
 from fenix.services import cloud_support
+from fenix.utils.errors import PermanentError, RetryableError, ValidationError
 from fenix.utils.state import load, save
 from fenix.utils.validation import identifier
 
@@ -172,12 +174,94 @@ def inject_fault(alias: str) -> None:
         None cuando el fallo simulado se verifica mediante el SDK.
     Raises:
         ValidationError: Si el alias no pertenece al inventario.
-        NotImplementedError: Mientras falte TODO I6-A.
+        PermanentError: Recurso inexistente, terminado o con identidad ajena.
+        RetryableError: El nodo no llegó a stopped dentro de la espera acotada.
+        ClientError: Si el emulador rechaza la operación; la CLI lo registra.
     Side Effects:
         Modifica únicamente el recurso de prueba de ese grupo.
+    Notes:
+        Es idempotente: si la falla ya está presente, no repite la acción.
+        Fabrica el problema; no envía el evento: eso lo hace la CLI send.
     """
-    # TODO I6-A: resolver el alias en inventario; jamás recibir InstanceId libre.
-    # node-01: stop_instances y comprobar stopped, con consultas limitadas.
-    # bucket-01: quitar Owner conservando el resto de etiquetas.
-    # Esta función fabrica el problema; no debe enviar el evento automáticamente.
-    raise NotImplementedError("I6-A: inyectar y comprobar fallo")
+    resource = load(_INVENTORY_PATH).get(alias) if isinstance(alias, str) else None
+    if not isinstance(resource, dict) or not resource.get("id"):  # Nunca un ID libre.
+        raise ValidationError("El alias no pertenece al inventario")
+    expected = _tag_map(resource.get("expected_tags"))
+    if resource.get("type") == "ec2":
+        _stop_node(resource["id"], expected)
+    elif resource.get("type") == "s3":
+        _drop_owner(resource["id"], expected)
+    else:
+        raise ValidationError("Tipo de recurso no soportado por inject_fault")
+
+
+# ── Inyección de fallas (I6-A) ─────────────────────────────────────────
+FAULT_POLLS = 15  # Consultas máximas al inyectar la falla del nodo.
+FAULT_PAUSE = 1  # Segundos entre consultas.
+
+
+def _tag_map(tags: list[dict] | dict | None) -> dict:
+    """Normaliza etiquetas de Boto3 (lista Key/Value) o del inventario (dict) a dict."""
+    if tags is None:
+        return {}
+    if isinstance(tags, dict):
+        return dict(tags)
+    return {row["Key"]: row["Value"] for row in tags}
+
+
+def _identity_ok(current: dict, expected: dict) -> None:
+    """Falla si una etiqueta de identidad del recurso contradice el inventario."""
+    for key in ("ManagedBy", "Project", "GroupId"):
+        if key in current and key in expected and current[key] != expected[key]:
+            raise PermanentError(f"La etiqueta {key} contradice el inventario")
+
+
+def _node_state(ec2, instance_id: str) -> dict:
+    """Devuelve la instancia del inventario o falla si ya no existe."""
+    reservations = ec2.describe_instances(InstanceIds=[instance_id]).get("Reservations", [])
+    if not reservations or not reservations[0].get("Instances"):
+        raise PermanentError("La instancia del inventario no existe")
+    return reservations[0]["Instances"][0]
+
+
+def _stop_node(instance_id: str, expected: dict) -> None:
+    """Detiene la instancia del grupo y comprueba stopped con consultas limitadas."""
+    ec2 = client("ec2")
+    instance = _node_state(ec2, instance_id)
+    _identity_ok(_tag_map(instance.get("Tags")), expected)  # Solo recursos propios.
+    state = instance["State"]["Name"]
+    if state in ("terminated", "shutting-down"):
+        raise PermanentError("La instancia está terminada; volver a ejecutar setup-demo")
+    if state in ("pending", "running"):  # stopped/stopping no necesitan otra orden.
+        ec2.stop_instances(InstanceIds=[instance_id])
+    for _ in range(FAULT_POLLS):  # Espera acotada: nunca un bucle infinito.
+        if _node_state(ec2, instance_id)["State"]["Name"] == "stopped":
+            return
+        time.sleep(FAULT_PAUSE)
+    raise RetryableError("La instancia no llegó a stopped dentro de la espera")
+
+
+def _drop_owner(bucket: str, expected: dict) -> None:
+    """Quita Owner del bucket del grupo conservando las demás etiquetas."""
+    s3 = client("s3")
+    try:
+        current = _tag_map(s3.get_bucket_tagging(Bucket=bucket)["TagSet"])
+    except ClientError as error:
+        code = error.response.get("Error", {}).get("Code")
+        if code == "NoSuchTagSet":  # Sin etiquetas: Owner ya falta.
+            return
+        if code in ("NoSuchBucket", "404"):
+            raise PermanentError("El bucket del inventario no existe") from error
+        raise
+    _identity_ok(current, expected)  # No altera un bucket ajeno.
+    if "Owner" not in current:  # Falla ya presente: idempotente.
+        return
+    remaining = {key: value for key, value in current.items() if key != "Owner"}
+    if remaining:
+        s3.put_bucket_tagging(Bucket=bucket,
+                              Tagging={"TagSet": cloud_support.aws_tags(remaining)})
+    else:  # Un TagSet vacío se expresa borrando el etiquetado.
+        s3.delete_bucket_tagging(Bucket=bucket)
+    after = _tag_map(s3.get_bucket_tagging(Bucket=bucket)["TagSet"]) if remaining else {}
+    if "Owner" in after or after != remaining:  # Verificación por relectura.
+        raise RetryableError("No se pudo verificar la falla del bucket")
