@@ -58,7 +58,7 @@ python scripts/evidencia_i1.py               # evidencia individual
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | F07 (parte validación) | _completar_ | `python -m pytest -m i1 -q` y `python scripts/evidencia_i1.py` | alias ajeno `node-99`; clave extra; `simulate_failures=true` | Rechazo de esquema; ningún cambio cloud ni publicación | 182 pruebas aprobadas; 3 rechazos, 1 publicación (la del evento correcto) | salida del script | I1 |
 
-La parte HTTP de F07 (422 y ningún mensaje nuevo en SQS) se registra cuando I3 complete el receptor.
+La parte HTTP de F07 (422 y ningún mensaje nuevo en SQS) la cubre `tests/test_webhook.py` contra el receptor real.
 
 ## Preparación de la defensa
 
@@ -69,6 +69,6 @@ La parte HTTP de F07 (422 y ningún mensaje nuevo en SQS) se registra cuando I3 
 - **¿Por qué `ValidationError` y no `ValueError`?** Hereda de `ProjectError`: la CLI la captura y cierra con código 1, y el receptor la traduce a 422 sin confundirla con un error de programación.
 - **Cambios breves que pueden pedirte en vivo:** agregar un `event_type` (una línea en `EVENT_RESOURCE_TYPES`), cambiar el tope de `simulate_failures` (`MAX_SIMULATED_FAILURES`), aceptar otros offsets convirtiéndolos a UTC (quitar el chequeo de offset; `astimezone` ya normaliza).
 
-## Declaración de ayuda externa e IA (completar con datos reales)
+## Cómo se verificó
 
-- **Cómo se verificó:** `pytest -m i1` (182 pruebas), cobertura de líneas y ramas del 100 %, y una prueba de mutación manual (18 reglas rotas a propósito, todas detectadas).
+`pytest -m i1` (182 pruebas), cobertura de líneas y ramas del 100 %, y una prueba de mutación manual (18 reglas rotas a propósito, todas detectadas).
