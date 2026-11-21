@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 logs/
 src/ppa2_fenix.egg-info/SOURCES.txt
+.pytest_cache
