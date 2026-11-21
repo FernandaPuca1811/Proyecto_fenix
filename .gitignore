@@ -1,7 +1,16 @@
-.env*
+# Secretos y entorno local (.env.example sí se versiona)
+.env
+.venv/
+
+# Python
 __pycache__/
 *.py[cod]
-*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Estado de ejecución: lo regeneran setup-demo, el worker y cada proceso
+data/
 logs/
-src/ppa2_fenix.egg-info/SOURCES.txt
-.pytest_cache
+
+# Sistema operativo
+.DS_Store
