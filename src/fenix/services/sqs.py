@@ -12,7 +12,6 @@ def ensure_queues(prefix: str) -> tuple[str, str]:
         Tupla (work_url, dlq_url), tomada de las respuestas de Boto3.
     Raises:
         ClientError: Si SQS rechaza una operación; la CLI lo registra.
-        NotImplementedError: Mientras falte TODO I2-A.
     Side Effects:
         Crea dos colas y actualiza RedrivePolicy en la cola principal.
     Notes:
@@ -123,7 +122,6 @@ def retry_later(url: str, message: dict) -> int:
         Segundos asignados: min(30, 2 ** número_de_recepción).
     Raises:
         ClientError: Si no se pudo cambiar la visibilidad.
-        NotImplementedError: Mientras falte TODO I2-B.
     Side Effects:
         Cambia la visibilidad; RedrivePolicy sigue controlando la DLQ.
     """
