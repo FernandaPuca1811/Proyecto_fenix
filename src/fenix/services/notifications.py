@@ -9,24 +9,44 @@ import requests
 from fenix.utils.errors import PermanentError, RetryableError
 
 
-def _wait_retry_after(response: requests.Response) -> None:
-    """Espera según Retry-After, limitado a 30 segundos; ignora valores malformados."""
+def _wait_retry_after(
+    response: requests.Response, max_wait: float = 30.0
+) -> float:
+    """Espera el Retry-After de la respuesta, limitado por ``max_wait``.
+
+    Args:
+        response: Respuesta que puede incluir el encabezado Retry-After.
+        max_wait: Máximo de segundos a esperar; debe ser finito y no negativo.
+    Returns:
+        Segundos efectivamente esperados, o ``0.0`` si falta o no se puede
+        interpretar Retry-After.
+    Raises:
+        ValueError: Si ``max_wait`` no es finito o es negativo.
+    Side Effects:
+        Llama a ``time.sleep`` solo cuando la espera resultante es positiva.
+    """
+    if not math.isfinite(max_wait) or max_wait < 0:
+        raise ValueError("max_wait debe ser finito y no negativo")
     headers = getattr(response, "headers", None)
     value = headers.get("Retry-After") if headers else None
     if not value:
-        return
+        return 0.0
     try:
         delay = float(value)
     except (TypeError, ValueError):
         try:
             retry_at = parsedate_to_datetime(value)
         except (TypeError, ValueError, OverflowError):
-            return
+            return 0.0
         if retry_at.tzinfo is None:
             retry_at = retry_at.replace(tzinfo=timezone.utc)
         delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
-    if math.isfinite(delay):
-        time.sleep(min(30, max(0, delay)))
+    if not math.isfinite(delay):
+        return 0.0
+    wait = min(max_wait, max(0.0, delay))
+    if wait > 0:
+        time.sleep(wait)
+    return wait
 
 
 def notify(text: str) -> None:
@@ -108,4 +128,4 @@ def notify(text: str) -> None:
         if error_code == 429 or (isinstance(error_code, int) and error_code >= 500):
             raise RetryableError("Telegram no disponible temporalmente")
         raise PermanentError("Telegram no confirmó la notificación")
-    
+

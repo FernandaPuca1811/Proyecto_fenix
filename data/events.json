@@ -55,5 +55,24 @@
     "last_error": null,
     "created_at": "2026-11-20T02:24:00+00:00",
     "updated_at": "2026-11-20T02:24:01+00:00"
+  },
+  "evt-evidencia-cf3109f56a3c": {
+    "event": {
+      "schema_version": 1,
+      "event_id": "evt-evidencia-cf3109f56a3c",
+      "event_type": "bucket.tags_missing",
+      "resource_id": "bucket-01",
+      "occurred_at": "2026-10-22T18:00:00Z",
+      "simulate_failures": 0
+    },
+    "fingerprint": "033576e3b03b3077617eea5f35637029ebe0ca6ae4b3806580cb64a3e362f525",
+    "attempts": 1,
+    "repair_done": true,
+    "repair_result": "already_ok",
+    "notified": true,
+    "status": "completed",
+    "last_error": null,
+    "created_at": "2026-11-24T21:31:42+00:00",
+    "updated_at": "2026-11-24T21:31:43+00:00"
   }
 }
