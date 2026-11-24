@@ -1,0 +1,78 @@
+{
+  "evt-nodo-0043": {
+    "event": {
+      "schema_version": 1,
+      "event_type": "instance.stopped",
+      "resource_id": "node-01",
+      "occurred_at": "2026-11-21T00:43:04Z",
+      "simulate_failures": 0,
+      "event_id": "evt-nodo-0043"
+    },
+    "fingerprint": "60669ebdd207725331fdcf57ecce0c50fca0d7c3eb06b7e4dba1814aad2e2fa9",
+    "attempts": 1,
+    "repair_done": true,
+    "repair_result": "repaired",
+    "notified": true,
+    "status": "completed",
+    "last_error": null,
+    "created_at": "2026-11-21T00:43:18+00:00",
+    "updated_at": "2026-11-21T00:43:18+00:00"
+  },
+  "evt-bucket-0043": {
+    "event": {
+      "schema_version": 1,
+      "event_type": "bucket.tags_missing",
+      "resource_id": "bucket-01",
+      "occurred_at": "2026-11-21T00:43:04Z",
+      "simulate_failures": 0,
+      "event_id": "evt-bucket-0043"
+    },
+    "fingerprint": "1c5cff5898c06ab38c8b56c0bdedb38c401def578ae252979445c10525dad2c0",
+    "attempts": 1,
+    "repair_done": true,
+    "repair_result": "repaired",
+    "notified": true,
+    "status": "completed",
+    "last_error": null,
+    "created_at": "2026-11-21T00:43:21+00:00",
+    "updated_at": "2026-11-21T00:43:21+00:00"
+  },
+  "evt-backoff-0043": {
+    "event": {
+      "schema_version": 1,
+      "event_type": "instance.stopped",
+      "resource_id": "node-01",
+      "occurred_at": "2026-11-21T00:43:04Z",
+      "simulate_failures": 2,
+      "event_id": "evt-backoff-0043"
+    },
+    "fingerprint": "c2e0344f74c9563e8cc2d233e6cc9ce3acfd7f573fa1cae7f18ce0bf25fea57a",
+    "attempts": 3,
+    "repair_done": true,
+    "repair_result": "repaired",
+    "notified": true,
+    "status": "completed",
+    "last_error": null,
+    "created_at": "2026-11-21T00:43:26+00:00",
+    "updated_at": "2026-11-21T00:43:33+00:00"
+  },
+  "evt-dlq-0043": {
+    "event": {
+      "schema_version": 1,
+      "event_type": "instance.stopped",
+      "resource_id": "node-01",
+      "occurred_at": "2026-11-21T00:43:04Z",
+      "simulate_failures": 5,
+      "event_id": "evt-dlq-0043"
+    },
+    "fingerprint": "d5558732768f0f25db25e9fd71aa92792c8e7fffce66dd63d6ec1ce8fb668c9d",
+    "attempts": 3,
+    "repair_done": false,
+    "repair_result": null,
+    "notified": false,
+    "status": "retry_pending",
+    "last_error": "simulated_failure",
+    "created_at": "2026-11-21T00:43:35+00:00",
+    "updated_at": "2026-11-21T00:43:42+00:00"
+  }
+}

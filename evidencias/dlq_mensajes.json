@@ -1,0 +1,17 @@
+[
+  {
+    "MessageId": "e24affff-300b-40de-9c40-0cc8d47f6a9e",
+    "Body": "{\"schema_version\": 1, \"event_type\": \"instance.stopped\", \"resource_id\": \"node-01\", \"occurred_at\": \"2026-11-21T00:43:04Z\", \"simulate_failures\": 5, \"event_id\": \"evt-dlq-0043\"}",
+    "ApproximateReceiveCount": "6"
+  },
+  {
+    "MessageId": "13b82479-f9f7-46a5-8ee6-c5b3e11d9b51",
+    "Body": "{\"schema_version\": 1, \"event_type\": \"instance.stopped\", \"resource_id\": \"node-01\", \"occurred_at\": \"2026-11-19T00:00:00Z\", \"simulate_failures\": 0, \"event_id\": \"evt-nodo-0043\"}",
+    "ApproximateReceiveCount": "5"
+  },
+  {
+    "MessageId": "b1b49117-b684-4d74-800b-d3032776f377",
+    "Body": "{\"event_id\": \"evt-roto\", ",
+    "ApproximateReceiveCount": "5"
+  }
+]
