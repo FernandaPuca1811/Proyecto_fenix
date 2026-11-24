@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from fenix.services.notifications import notify
+from fenix.services.notifications import _wait_retry_after, notify
 from fenix.utils.errors import PermanentError, RetryableError
 
 
@@ -17,6 +17,20 @@ def _response(
         json=Mock(return_value=payload),
         headers={} if headers is None else headers,
     )
+
+
+@pytest.mark.parametrize(
+    ("header", "max_wait", "expected"),
+    [("4", 10, 4), ("45", 30, 30), ("-3", 30, 0), ("invalid", 30, 0)],
+)
+def test_wait_retry_after_returns_bounded_delay(monkeypatch, header, max_wait, expected):
+    sleeps = []
+    monkeypatch.setattr("fenix.services.notifications.time.sleep", sleeps.append)
+
+    waited = _wait_retry_after(_response(429, {}, {"Retry-After": header}), max_wait)
+
+    assert waited == expected
+    assert sleeps == ([expected] if expected else [])
 
 
 def test_telegram_sends_limited_message(monkeypatch):
